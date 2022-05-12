@@ -7,9 +7,9 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 
-// Required for camera OV2640
-#include "OV2640Streamer.h"
-#include "OV2640.h"
+// Webserver
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
 
 // Requires for temperature sensor DS18B20
 #include <OneWire.h>
@@ -21,9 +21,9 @@
 // Definitions of PINs etc.
 ///////////////////////////////////////////////////////////////
 // ESP32 Pins
-#define RELAY_FAN_PIN 27
-#define RELAY_CAM_PIN 28
-#define RELAY_PUMP_PIN 29
+#define RELAY_FAN_PIN 25
+#define RELAY_PUMP_PIN 26
+#define RELAY_CAM_PIN 27
 #define TEMPERATURE_1_PIN 4
 #define TEMPERATURE_2_PIN 5
 
@@ -31,18 +31,18 @@
 #define SSID ""
 #define PASSWORD ""
 
+// Temperature update on MQTT
+#define TEMPERATURE_UPDATE_DELAY_MS 30000
+
 ///////////////////////////////////////////////////////////////
 // Globals
 ///////////////////////////////////////////////////////////////
-OV2640 cam;
-//WebServer server(80);
-//WiFiServer rtspServer(8554);
 WiFiClient client;
 OneWire oneWire1(TEMPERATURE_1_PIN);
 OneWire oneWire2(TEMPERATURE_2_PIN);
-DallasTemperature sensors1(&oneWire1);
-DallasTemperature sensors2(&oneWire2);
-
+DallasTemperature sensor1(&oneWire1);
+DallasTemperature sensor2(&oneWire2);
+AsyncWebServer server(80);
 void(* resetFunc) (void) = 0; //declare reset function @ address 0
 
 ///////////////////////////////////////////////////////////////
@@ -56,27 +56,73 @@ void setup() {
   {
       ;
   }
-  Serial.print(F("Setup..."));
 
-  // Start the DS18B20 sensors
-  sensors1.begin();
-  sensors2.begin();
-
-  Serial.printf("Camera init: %d\n", cam.init(esp32cam_aithinker_config));
 
   StartWIFI();
+  Serial.print("Using IP address:");
+  Serial.println(WiFi.localIP());
+
+  // Start the DS18B20 sensors
+  sensor1.begin();
+  sensor2.begin();
+
+  Serial.print(F("Setup..."));
 
   pinMode(RELAY_FAN_PIN, OUTPUT);
   pinMode(RELAY_CAM_PIN, OUTPUT);
   pinMode(RELAY_PUMP_PIN, OUTPUT);
-  Serial.println(F("Complete."));
+
+  // The relay uses high = off (in my case)
+  digitalWrite(RELAY_PUMP_PIN, HIGH);
+  digitalWrite(RELAY_CAM_PIN, HIGH);
+  digitalWrite(RELAY_FAN_PIN, HIGH);
+
+  // Create our async handlers.
+  server.on("/fan/on", HTTP_GET, [](AsyncWebServerRequest *req) {
+    RelayOn(RELAY_FAN_PIN);
+    req->send(200);
+  });
+
+  server.on("/fan/off", HTTP_GET, [](AsyncWebServerRequest *req) {
+    RelayOff(RELAY_FAN_PIN);
+    req->send(200);
+  });
+
+  server.on("/cam/on", HTTP_GET, [](AsyncWebServerRequest *req) {
+    RelayOn(RELAY_CAM_PIN);
+    req->send(200);
+  });
+
+  server.on("/cam/off", HTTP_GET, [](AsyncWebServerRequest *req) {
+    RelayOff(RELAY_CAM_PIN);
+    req->send(200);
+  });
+
+  server.on("/pump/on", HTTP_GET, [](AsyncWebServerRequest *req) {
+    RelayOn(RELAY_PUMP_PIN);
+    req->send(200);
+  });
+
+  server.on("/pump/off", HTTP_GET, [](AsyncWebServerRequest *req) {
+    RelayOff(RELAY_PUMP_PIN);
+    req->send(200);
+  });
+
+  Serial.println(F("Complete, starting webserver."));
+  // Start the webserver
+  server.begin();
 }
 
 ///////////////////////////////////////////////////////////////
 // main loop
 ///////////////////////////////////////////////////////////////
 void loop() {
-    // TBD
+    ReadTemperature(sensor1);
+    ReadTemperature(sensor2);
+
+    // TBD: Send to MQTT
+
+    delay(TEMPERATURE_UPDATE_DELAY_MS);
 }
 
 ///////////////////////////////////////////////////////////////
@@ -84,7 +130,7 @@ void loop() {
 ///////////////////////////////////////////////////////////////
 void RelayOn(int r) {
     Serial.printf("ON relay: %d\n", r);
-    digitalWrite(r, HIGH);
+    digitalWrite(r, LOW);
 }
 
 ///////////////////////////////////////////////////////////////
@@ -92,14 +138,13 @@ void RelayOn(int r) {
 ///////////////////////////////////////////////////////////////
 void RelayOff(int r) {
     Serial.printf("OFF relay: %d\n", r);
-    digitalWrite(r, LOW);
+    digitalWrite(r, HIGH);
 }
 
 ///////////////////////////////////////////////////////////////
 // StartWIFI starts up the wifi connection
 ///////////////////////////////////////////////////////////////
-bool StartWIFI()
-{
+bool StartWIFI() {
   Serial.println("Connecting to WIFI");
   Serial.println("");
 
@@ -136,14 +181,7 @@ bool StartWIFI()
 ///////////////////////////////////////////////////////////////
 // Return the value of the given sensor
 ///////////////////////////////////////////////////////////////
-float ReadTemperature(int sensor) {
-  if (sensor == 1) {
-      sensors1.requestTemperatures(); 
-      return sensors1.getTempCByIndex(0);
-  } else if (sensor == 2) {
-      sensors2.requestTemperatures(); 
-      return sensors1.getTempCByIndex(0);
-  }
-
-  return 0;
+float ReadTemperature(DallasTemperature sensor) {
+    sensor.requestTemperatures(); 
+    return sensor.getTempCByIndex(0);
 }
