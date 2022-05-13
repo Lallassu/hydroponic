@@ -85,6 +85,7 @@ void setup() {
   digitalWrite(RELAY_FAN_PIN, HIGH);
 
   // Create our async handlers.
+  // https://www.home-assistant.io/integrations/switch.rest/
   server.on("/fan/on", HTTP_GET, [](AsyncWebServerRequest *req) {
     RelayOn(RELAY_FAN_PIN);
     req->send(200);
@@ -217,3 +218,4 @@ float ReadTemperature(DallasTemperature sensor) {
     sensor.requestTemperatures(); 
     return sensor.getTempCByIndex(0);
 }
+
