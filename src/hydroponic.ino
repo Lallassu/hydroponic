@@ -15,7 +15,8 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
-
+// MQTT
+#include <PubSubClient.h>
 
 ///////////////////////////////////////////////////////////////
 // Definitions of PINs etc.
@@ -28,8 +29,14 @@
 #define TEMPERATURE_2_PIN 5
 
 // WiFi details
-#define SSID ""
-#define PASSWORD ""
+#define SSID "__test__"
+#define PASSWORD "__test__"
+
+// MQTT
+#define MQTT_HOST "192.168.1.4"
+#define MQTT_PORT 188
+#define MQTT_USER "__test__"
+#define MQTT_PASS "__test__"
 
 // Temperature update on MQTT
 #define TEMPERATURE_UPDATE_DELAY_MS 30000
@@ -43,6 +50,8 @@ OneWire oneWire2(TEMPERATURE_2_PIN);
 DallasTemperature sensor1(&oneWire1);
 DallasTemperature sensor2(&oneWire2);
 AsyncWebServer server(80);
+PubSubClient mqttClient(client);
+
 void(* resetFunc) (void) = 0; //declare reset function @ address 0
 
 ///////////////////////////////////////////////////////////////
@@ -52,11 +61,7 @@ void setup() {
 
   // initialize digital pin as an output.
   Serial.begin(115200);
-  while (!Serial)
-  {
-      ;
-  }
-
+  while (!Serial) { ; }
 
   StartWIFI();
   Serial.print("Using IP address:");
@@ -67,6 +72,8 @@ void setup() {
   sensor2.begin();
 
   Serial.print(F("Setup..."));
+
+  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
 
   pinMode(RELAY_FAN_PIN, OUTPUT);
   pinMode(RELAY_CAM_PIN, OUTPUT);
@@ -117,10 +124,20 @@ void setup() {
 // main loop
 ///////////////////////////////////////////////////////////////
 void loop() {
-    ReadTemperature(sensor1);
-    ReadTemperature(sensor2);
+    if (!mqttClient.connected()) {
+        StartMQTT();
+    }
+    mqttClient.loop();
 
-    // TBD: Send to MQTT
+    float temp = 0;
+    char tempStr[8];
+    temp = ReadTemperature(sensor1);
+    dtostrf(temp, 1,2, tempStr);
+    mqttClient.publish("hydroponic/temperature1", tempStr);
+
+    temp = ReadTemperature(sensor2);
+    dtostrf(temp, 1,2, tempStr);
+    mqttClient.publish("hydroponic/temperature1", tempStr);
 
     delay(TEMPERATURE_UPDATE_DELAY_MS);
 }
@@ -142,9 +159,27 @@ void RelayOff(int r) {
 }
 
 ///////////////////////////////////////////////////////////////
+// StartMQTT starts up the mqtt connection
+///////////////////////////////////////////////////////////////
+void StartMQTT() {
+    while (!mqttClient.connected()) {
+        Serial.print("Attempting MQTT connection...");
+        // Attempt to connect
+        if (mqttClient.connect("hydroponic", MQTT_USER, MQTT_PASS)) {
+            Serial.println("connected");
+        } else {
+            Serial.print("failed, state:");
+            Serial.print(mqttClient.state());
+            Serial.println(" retry in 5 seconds...");
+            delay(5000);
+        }
+    }
+}
+
+///////////////////////////////////////////////////////////////
 // StartWIFI starts up the wifi connection
 ///////////////////////////////////////////////////////////////
-bool StartWIFI() {
+void StartWIFI() {
   Serial.println("Connecting to WIFI");
   Serial.println("");
 
@@ -154,8 +189,7 @@ bool StartWIFI() {
 
   unsigned long startMills = millis();
 
-  while (WiFi.status() != WL_CONNECTED)
-  {
+  while (WiFi.status() != WL_CONNECTED) {
     unsigned long cMills = millis();
 
     delay(500);
@@ -164,7 +198,7 @@ bool StartWIFI() {
       Serial.println("Could not connect to WIFI. Aborting");
       Serial.println("rebooting");
       resetFunc();
-      return false;
+      return;
     }
   }
 
@@ -174,8 +208,6 @@ bool StartWIFI() {
   ip = WiFi.localIP();
   Serial.println(F("WiFi connected"));
   Serial.println(ip);
-
-  return true;
 }
 
 ///////////////////////////////////////////////////////////////
