@@ -17,8 +17,18 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
+// BH1750 light sensor
+#include <Wire.h>
+#include <BH1750.h>
+
+// DHT11 temp/humidity sensor
+#include "DHT.h"
+
 // MQTT
 #include <PubSubClient.h>
+
+// Watchdog
+#include <esp_task_wdt.h>
 
 ///////////////////////////////////////////////////////////////
 // Definitions of PINs etc.
@@ -30,6 +40,10 @@
 #define TEMPERATURE_1_PIN 4
 #define TEMPERATURE_2_PIN 5
 
+// Humid/Temp sensor DHT11
+#define DHTTYPE DHT11
+#define DHTPIN 15
+
 // WiFi details
 #define SSID "__ssid__"
 #define PASSWORD "__ssid_pass__"
@@ -40,13 +54,19 @@
 #define MQTT_USER "__mqtt_user__"
 #define MQTT_PASS "__mqtt_pass__"
 
-// Temperature update interval on MQTT
-#define TEMPERATURE_UPDATE_DELAY_MS 30000
+// Sensor update interval on MQTT
+#define SENSOR_UPDATE_DELAY_MS 30000
+#define SAMPLES 3
+#define SENSOR_DELAY 100
+
+// Watchdog timeout
+#define WDT_TIMEOUT 20
 
 ///////////////////////////////////////////////////////////////
 // Globals
 ///////////////////////////////////////////////////////////////
 WiFiClient client;
+BH1750 lightMeter;
 OneWire oneWire1(TEMPERATURE_1_PIN);
 OneWire oneWire2(TEMPERATURE_2_PIN);
 DallasTemperature sensor1(&oneWire1);
@@ -54,6 +74,8 @@ DallasTemperature sensor2(&oneWire2);
 AsyncWebServer server(80);
 PubSubClient mqttClient(client);
 StaticJsonDocument<250> jsonDocument;
+DHT dht(DHTPIN, DHTTYPE);
+
 char buffer[250];
 void(* resetFunc) (void) = 0;
 
@@ -65,11 +87,25 @@ void setup() {
     Serial.begin(115200);
     while (!Serial) { ; }
 
+    // Enable watchdog and panic if not reset within timeout
+    esp_task_wdt_init(WDT_TIMEOUT, true); 
+    // Add this thread to wdt
+    esp_task_wdt_add(NULL); 
+
     StartWIFI();
 
     // Start the DS18B20 sensors
     sensor1.begin();
     sensor2.begin();
+
+    // I2C bus init
+    Wire.begin();
+
+    // DHT11 temp/humid sensor
+    dht.begin();
+
+    // Light sensor
+    lightMeter.begin();
 
     mqttClient.setServer(MQTT_HOST, MQTT_PORT);
 
@@ -163,23 +199,127 @@ void HandleRequest(JsonVariant &json, AsyncWebServerRequest *req, int type) {
 ///////////////////////////////////////////////////////////////
 // main loop
 ///////////////////////////////////////////////////////////////
+char tempStr[8];
+float temp1 = 0;
+float temp2 = 0;
+float lux = 0;
+float heatIndex = 0;
+float temp3 = 0;
+float humid = 0;
+float tmp = 0;
+float sTemp1 = 0;
+float sTemp2 = 0;
+float sTemp3 = 0;
+float sLux = 0;
+float sHumid = 0;
+int last = millis();
+
 void loop() {
+    esp_task_wdt_reset();
+    
+    // Make sure we are connected
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("Connecting to wifi(not connected)...");
+        StartWIFI();
+    }
+
     if (!mqttClient.connected()) {
+        Serial.println("Connecting to mqtt...");
         StartMQTT();
     }
     mqttClient.loop();
 
-    float temp = 0;
-    char tempStr[8];
-    temp = ReadTemperature(sensor1);
-    dtostrf(temp, 1,2, tempStr);
-    mqttClient.publish("hydroponic/temperature1", tempStr);
+    // Sample and send updates every X ms
+    if (millis() - last >= SENSOR_UPDATE_DELAY_MS) {
+        last = millis();
+        temp1 = 0;
+        temp2 = 0;
+        lux = 0;
+        heatIndex = 0;
+        temp3 = 0;
+        humid = 0;
+        tmp = 0;
+        sTemp1 = 0;
+        sTemp2 = 0;
+        sTemp3 = 0;
+        sLux = 0;
+        sHumid = 0;
 
-    temp = ReadTemperature(sensor2);
-    dtostrf(temp, 1,2, tempStr);
-    mqttClient.publish("hydroponic/temperature2", tempStr);
+        for (int i = 0; i < SAMPLES; i++) {
+            delay(SENSOR_DELAY);
+            tmp = ReadTemperature(sensor1);
+            if (tmp >= -55 && tmp <= 125) {
+                temp1 += tmp;
+                sTemp1++;
+            }
 
-    delay(TEMPERATURE_UPDATE_DELAY_MS);
+            delay(SENSOR_DELAY);
+            tmp = ReadTemperature(sensor2);
+            if (tmp >= -55 && tmp <= 125) {
+                temp2 += tmp;
+                sTemp2++;
+            }
+
+            delay(SENSOR_DELAY);
+            tmp = lightMeter.readLightLevel();
+            if (tmp >= 0 && tmp <= 65535) {
+                lux += tmp;
+                sLux++;
+            }
+
+            delay(SENSOR_DELAY);
+            tmp = dht.readHumidity();
+            // DHT11 actually only have 20 - 90
+            if (tmp >= 0 && tmp <= 100) {
+                humid += tmp;
+                sHumid++;
+            }
+
+            delay(SENSOR_DELAY);
+            tmp = dht.readTemperature();
+            if (tmp >= 0 && tmp <= 50) {
+                temp3 += tmp;
+                sTemp3++;
+            }
+        }
+
+        // Avg of the samples
+        if (sTemp1 > 0) {
+            temp1 /= sTemp1;
+            dtostrf(temp1, 1,2, tempStr);
+            mqttClient.publish("hydroponic/temperature1", tempStr);
+        }
+
+        if (sTemp2 > 0) {
+            temp2 /= sTemp2;
+            dtostrf(temp2, 1,2, tempStr);
+            mqttClient.publish("hydroponic/temperature2", tempStr);
+        }
+
+        if (sLux > 0) {
+            lux /= sLux;
+            dtostrf(lux, 1,2, tempStr);
+            mqttClient.publish("hydroponic/light1", tempStr);
+        }
+
+        if (sTemp3 > 0) {
+            temp3 /= sTemp3;
+            dtostrf(temp3, 1,2, tempStr);
+            mqttClient.publish("hydroponic/temperature3", tempStr);
+        }
+        if (sHumid > 0){
+            humid /= sHumid;
+            dtostrf(humid, 1,2, tempStr);
+            mqttClient.publish("hydroponic/humidity1", tempStr);
+        }
+
+        // Heat index (temp combiend with humidity = heat index)
+        if (sHumid > 0 && sTemp3 > 0) {
+            heatIndex = dht.computeHeatIndex(temp3, humid, false);
+            dtostrf(heatIndex, 1,2, tempStr);
+            mqttClient.publish("hydroponic/heatindex1", tempStr);
+        }
+    }
 }
 
 ///////////////////////////////////////////////////////////////
@@ -201,12 +341,13 @@ void RelayOff(int r) {
 ///////////////////////////////////////////////////////////////
 void StartMQTT() {
     while (!mqttClient.connected()) {
+        Serial.println("Connecting to mqtt...");
         // Attempt to connect
         if (!mqttClient.connect("hydroponic", MQTT_USER, MQTT_PASS)) {
             Serial.print("mqtt failed, state:");
             Serial.print(mqttClient.state());
-            Serial.println(" retry in 5 seconds...");
-            delay(5000);
+            Serial.println(" retry in 3 seconds...");
+            delay(3000);
         }
     }
 }
