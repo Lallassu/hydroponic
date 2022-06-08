@@ -86,11 +86,7 @@ void setup() {
     // initialize digital pin as an output.
     Serial.begin(115200);
     while (!Serial) { ; }
-
-    // Enable watchdog and panic if not reset within timeout
-    esp_task_wdt_init(WDT_TIMEOUT, true); 
-    // Add this thread to wdt
-    esp_task_wdt_add(NULL); 
+    Serial.println("Booting...");
 
     StartWIFI();
 
@@ -157,6 +153,11 @@ void setup() {
     Serial.println(WiFi.localIP());
 
     server.begin();
+
+    // Enable watchdog and panic if not reset within timeout
+    esp_task_wdt_init(WDT_TIMEOUT, true); 
+    // Add this thread to wdt
+    esp_task_wdt_add(NULL); 
 }
 
 ///////////////////////////////////////////////////////////////
@@ -215,6 +216,7 @@ float sHumid = 0;
 int last = millis();
 
 void loop() {
+    delay(1000);
     esp_task_wdt_reset();
     
     // Make sure we are connected
@@ -231,6 +233,7 @@ void loop() {
 
     // Sample and send updates every X ms
     if (millis() - last >= SENSOR_UPDATE_DELAY_MS) {
+        Serial.println("Sending sensor updates...");
         last = millis();
         temp1 = 0;
         temp2 = 0;
@@ -319,6 +322,7 @@ void loop() {
             dtostrf(heatIndex, 1,2, tempStr);
             mqttClient.publish("hydroponic/heatindex1", tempStr);
         }
+        Serial.println("Done sending sensor updates...");
     }
 }
 
@@ -340,6 +344,7 @@ void RelayOff(int r) {
 // StartMQTT starts up the mqtt connection
 ///////////////////////////////////////////////////////////////
 void StartMQTT() {
+    unsigned long startMills = millis();
     while (!mqttClient.connected()) {
         Serial.println("Connecting to mqtt...");
         // Attempt to connect
@@ -347,7 +352,13 @@ void StartMQTT() {
             Serial.print("mqtt failed, state:");
             Serial.print(mqttClient.state());
             Serial.println(" retry in 3 seconds...");
-            delay(3000);
+            delay(2000);
+        }
+        if (millis() - startMills > 10000) {
+            Serial.println("Could not connect to mqtt. Aborting");
+            Serial.println("rebooting");
+            resetFunc();
+            return;
         }
     }
 }
@@ -368,9 +379,7 @@ void StartWIFI() {
     while (WiFi.status() != WL_CONNECTED) {
         unsigned long cMills = millis();
 
-        delay(500);
-
-        if (millis() - startMills > 60000 * 3) {
+        if (millis() - startMills > 10000) {
             Serial.println("Could not connect to WIFI. Aborting");
             Serial.println("rebooting");
             resetFunc();
