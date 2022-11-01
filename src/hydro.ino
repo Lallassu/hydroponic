@@ -1,13 +1,14 @@
 /*
- *
  * Hydroponic automation
+ * Copyright (c) 2022 Magnus Lallassu
+ * License: MIT
  *
- * http://github.com/lallassu/hydroponic
+ * https://github.com/lallassu/hydroponic
  */
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 
-// Webserver
+// Web server
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
@@ -44,7 +45,7 @@
 #define DHTTYPE DHT11
 #define DHTPIN 15
 
-// WiFi details
+// Wi-Fi details
 #define SSID "__ssid__"
 #define PASSWORD "__ssid_pass__"
 
@@ -83,7 +84,7 @@ void(* resetFunc) (void) = 0;
 // Setup 
 ///////////////////////////////////////////////////////////////
 void setup() {
-    // initialize digital pin as an output.
+    // Initialize digital pin as an output
     Serial.begin(115200);
     while (!Serial) { ; }
     Serial.println("Booting...");
@@ -149,7 +150,7 @@ void setup() {
             req->send(200, "application/json", buffer);
     });
 
-    Serial.print("Starting webserver on: ");
+    Serial.print("Starting web server on: ");
     Serial.println(WiFi.localIP());
 
     server.begin();
@@ -161,7 +162,7 @@ void setup() {
 }
 
 ///////////////////////////////////////////////////////////////
-// read state of a pin and write json response
+// Read state of a pin and write JSON response
 ///////////////////////////////////////////////////////////////
 void PinStateToJSON(int pin) {
     jsonDocument.clear();  
@@ -198,7 +199,7 @@ void HandleRequest(JsonVariant &json, AsyncWebServerRequest *req, int type) {
 }
 
 ///////////////////////////////////////////////////////////////
-// main loop
+// The main loop
 ///////////////////////////////////////////////////////////////
 char tempStr[8];
 float temp1 = 0;
@@ -221,7 +222,7 @@ void loop() {
     
     // Make sure we are connected
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("Connecting to wifi(not connected)...");
+        Serial.println("Connecting to Wi-Fi (not connected) ...");
         StartWIFI();
     }
 
@@ -286,7 +287,7 @@ void loop() {
             }
         }
 
-        // Avg of the samples
+        // Average of the samples
         if (sTemp1 > 0) {
             temp1 /= sTemp1;
             dtostrf(temp1, 1,2, tempStr);
@@ -316,7 +317,7 @@ void loop() {
             mqttClient.publish("hydroponic/humidity1", tempStr);
         }
 
-        // Heat index (temp combiend with humidity = heat index)
+        // Heat index (temperature combiend with humidity = heat index)
         if (sHumid > 0 && sTemp3 > 0) {
             heatIndex = dht.computeHeatIndex(temp3, humid, false);
             dtostrf(heatIndex, 1,2, tempStr);
@@ -364,10 +365,10 @@ void StartMQTT() {
 }
 
 ///////////////////////////////////////////////////////////////
-// StartWIFI starts up the wifi connection
+// StartWIFI starts up the Wi-Fi connection
 ///////////////////////////////////////////////////////////////
 void StartWIFI() {
-    Serial.println("Connecting to WIFI");
+    Serial.println("Connecting to Wi-Fi");
     Serial.println("");
 
     WiFi.disconnect(false);
@@ -380,7 +381,7 @@ void StartWIFI() {
         unsigned long cMills = millis();
 
         if (millis() - startMills > 10000) {
-            Serial.println("Could not connect to WIFI. Aborting");
+            Serial.println("Could not connect to Wi-Fi. Aborting");
             Serial.println("rebooting");
             resetFunc();
             return;
