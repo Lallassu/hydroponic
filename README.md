@@ -1,8 +1,8 @@
 # Hydroponic
 Hydroponic automation with ESP32 and sensors
 
-- Temperature sensors  (DS18B20)
-- 5V Relays
+- Temperature sensors (DS18B20)
+- 5 V relays
 
 # Installation
 Using platformio:
@@ -16,10 +16,10 @@ Read the serial interface to get log output:
 pio device monitor -b 115200
 ```
 
-# Home Assistant Integration
+# Home Assistant integration
 
 Temperature sensors:
-```
+```yaml
 sensor:
     - platform: mqtt
       state_topic: 'hydroponic/temperature1'
@@ -30,7 +30,7 @@ sensor:
 ```
 
 Relay switches:
-```
+```yaml
 switch:
   - platform: rest
     name: "hydroponic_fan"
